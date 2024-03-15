@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Record Options</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #container {
+            text-align: center;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>How was the session? How did you feel?</h1>
+
+        <input type="radio" name="option" value="video" id="videoOption"> Video
+        <input type="radio" name="option" value="audio" id="audioOption" checked> Audio <!-- Audio option is checked by default -->
+        <input type="radio" name="option" value="text" id="textOption"> Text
+
+        <div id="videoSection" class="hidden">
+            <!-- <button onclick="startRecording('video')">Start Recording</button> -->
+            <button onclick="stopRecording('video')">Stop Recording</button>
+            <canvas id="videoCanvas" width="400" height="300" class="hidden"></canvas>
+            <video id="videoPreview" width="400" controls class="hidden"></video>
+        </div>
+
+        <div id="audioSection"> <!-- Audio section is visible by default -->
+            <button onclick="startRecording('audio')" id="startAudioBtn">Start Recording</button>
+            <button onclick="stopRecording('audio')" id="stopAudioBtn" class="hidden">Stop Recording</button>
+            <audio id="audioPreview" controls class="hidden"></audio>
+            <button onclick="submitResponse()">RECORD</button>
+        </div>
+
+        <div id="textSection" class="hidden">
+            <textarea id="textInput" rows="4" cols="50" placeholder="Enter text here"></textarea>
+            <button onclick="submitText()">Submit Text</button>
+        </div>
+
+        <div id="output"></div> <!-- Display area for transcription and sentiment -->
+
+        <div id="videoLinks"></div>
+    </div>
+
+    <script>
+        var audioRecorder;
+        var audioChunks = [];
+
+        function startRecording(option) {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(function(stream) {
+                    audioRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+                    audioRecorder.ondataavailable = function(event) {
+                        audioChunks.push(event.data);
+                    };
+                    audioRecorder.start();
+                    document.getElementById('startAudioBtn').classList.add('hidden');
+                    document.getElementById('stopAudioBtn').classList.remove('hidden');
+                })
+                .catch(function(err) {
+                    console.error('Error starting recording:', err);
+                });
+        }
+
+        function stopRecording(option) {
+            if (audioRecorder && audioRecorder.state !== 'inactive') {
+                audioRecorder.stop();
+                audioRecorder.onstop = function() {
+                    var audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    var audioURL = URL.createObjectURL(audioBlob);
+                    document.getElementById('audioPreview').src = audioURL;
+                };
+                document.getElementById('startAudioBtn').classList.remove('hidden');
+                document.getElementById('stopAudioBtn').classList.add('hidden');
+            }
+        }
+
+        function submitResponse() {
+            var audioElement = document.getElementById("audioPreview");
+            var audioBlob = null;
+            if (audioElement.src !== "") {
+                audioElement.controls = false;
+                audioElement.removeAttribute('controls');
+                audioElement.muted = true;
+                audioElement.play();
+                audioElement.addEventListener('ended', function () {
+                    audioElement.muted = false;
+                    audioElement.controls = true;
+                    audioElement.setAttribute('controls', 'controls');
+                    audioElement.currentTime = 0;
+                    audioElement.pause();
+                }, false);
+
+                var audioURL = audioElement.src;
+                fetch('/process_audio', {
+                    method: 'POST',
+                    body: new FormData(document.forms[0])
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if ('transcription' in data && 'sentiment' in data) {
+                        document.getElementById("output").innerText = "Transcription: " + data.transcription + "\nSentiment: " + data.sentiment+ "\nEmotion: " + data.emotion;
+                    } else if ('error' in data) {
+                        document.getElementById("output").innerText = "Error: " + data.error;
+                    } else {
+                        document.getElementById("output").innerText = "Unknown response from server";
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+            }
+        }
+
+        function submitText() {
+            var textValue = document.getElementById("textInput").value;
+            fetch("/process_text", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ text: textValue })
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("output").innerText = data.sentiment;
+            })
+            .catch(error => console.error("Error:", error));
+        }
+
+        document.querySelectorAll('input[name="option"]').forEach((elem) => {
+            elem.addEventListener("change", () => {
+                toggleOptions(elem.value);
+            });
+        });
+
+        function toggleOptions(option) {
+            document.getElementById("videoSection").classList.add("hidden");
+            document.getElementById("audioSection").classList.add("hidden");
+            document.getElementById("textSection").classList.add("hidden");
+
+            if (option === "video") {
+                document.getElementById("videoSection").classList.remove("hidden");
+            } else if (option === "audio") {
+                document.getElementById("audioSection").classList.remove("hidden");
+            } else if (option === "text") {
+                document.getElementById("textSection").classList.remove("hidden");
+            }
+        }
+    </script>
+</body>
+</html>
